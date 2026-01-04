@@ -4,8 +4,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="ProTrack Architect", layout="wide")
 
-# --- 1. THE EXERCISE MASTER LIST ---
-# (Shortened for brevity here, but keep your full list in your version!)
+# --- MASTER EXERCISE LIST ---
 EXERCISES = {
     "Chest": ["Incline DB Bench Press", "Incline Barbell Bench Press", "Barbell Bench Press", "Dumbbell Bench Press", "Seated Cable Flys", "Pec Dec Flys"],
     "Back": ["Weighted Pull Ups", "Close Grip Lat Pull Down", "Deficit Pendlay Row", "T-Bar Chest Supported Row", "Single Arm Cable Lat Pulls"],
@@ -15,69 +14,54 @@ EXERCISES = {
     "Legs": ["Lying Hamstring Curl", "Seated Hamstring Curl", "Pendulum Squat", "Hack Squat", "Barbell Back Squat", "Barbell Smith Machine Squat", "RDL", "Seated Leg Extension", "Standing Calf Raise", "Barbell Hip Thrust", "Machine Hip Thrust", "Hip Abduction", "Hip Adduction"]
 }
 
-# --- 2. INITIALIZE STORAGE ---
+# --- STORAGE ---
 if 'my_routines' not in st.session_state:
-    st.session_state.my_routines = {} # Format: {"Leg Day": ["RDL", "Hack Squat"]}
+    st.session_state.my_routines = {}
 if 'workout_log' not in st.session_state:
     st.session_state.workout_log = []
 
-# --- 3. APP NAVIGATION ---
+# --- TOP NAVIGATION ---
 st.title("🏋️‍♂️ ProTrack Architect")
-menu = st.sidebar.radio("Navigation", ["Run Workout", "Build Routine", "History"])
+menu = st.tabs(["🚀 Run Workout", "🛠 Build Routine", "📜 History"])
 
-# --- BUILDER SECTION ---
-if menu == "Build Routine":
-    st.header("🛠 Routine Builder")
-    new_routine_name = st.text_input("Routine Name", placeholder="e.g. Push Day A")
+# --- TAB 2: BUILDER ---
+with menu[1]:
+    st.header("Create a Routine")
+    new_name = st.text_input("Routine Name (e.g., Push Day)")
     
-    # Select multiple exercises from your list
-    all_ex_flat = [item for sublist in EXERCISES.values() for item in sublist]
-    selected_exs = st.multiselect("Select Exercises", all_ex_flat)
+    # Flatten the dictionary for the multiselect
+    all_ex = [item for sublist in EXERCISES.values() for item in sublist]
+    selected = st.multiselect("Pick Exercises", all_ex)
     
     if st.button("Save Routine"):
-        if new_routine_name and selected_exs:
-            st.session_state.my_routines[new_routine_name] = selected_exs
-            st.success(f"Routine '{new_routine_name}' saved!")
+        if new_name and selected:
+            st.session_state.my_routines[new_name] = selected
+            st.success(f"Saved {new_name}!")
         else:
-            st.error("Please provide a name and at least one exercise.")
+            st.error("Enter a name and pick exercises.")
 
-# --- RUN WORKOUT SECTION ---
-elif menu == "Run Workout":
-    st.header("🚀 Start Training")
+# --- TAB 1: RUN WORKOUT ---
+with menu[0]:
     if not st.session_state.my_routines:
-        st.warning("No routines found. Go to 'Build Routine' first!")
+        st.info("No routines found. Go to the 'Build Routine' tab to create one!")
     else:
-        chosen_routine = st.selectbox("Choose a Routine", list(st.session_state.my_routines.keys()))
-        routine_exercises = st.session_state.my_routines[chosen_routine]
+        chosen = st.selectbox("Select Workout", list(st.session_state.my_routines.keys()))
+        routine_exs = st.session_state.my_routines[chosen]
         
-        # Display exercises for the workout
-        st.info(f"Today's Plan: {', '.join(routine_exercises)}")
-        
-        # Logging Form
-        with st.form("set_logger", clear_on_submit=True):
-            ex = st.selectbox("Exercise to log", routine_exercises)
+        with st.form("logger"):
+            ex_to_log = st.selectbox("Exercise", routine_exs)
             c1, c2 = st.columns(2)
             w = c1.number_input("Weight (kg)", step=2.5)
             r = c2.number_input("Reps", step=1)
             if st.form_submit_button("Log Set"):
                 st.session_state.workout_log.append({
                     "Date": datetime.now().strftime("%Y-%m-%d"),
-                    "Routine": chosen_routine,
-                    "Exercise": ex,
-                    "Weight": w,
-                    "Reps": r
+                    "Routine": chosen, "Exercise": ex_to_log, "Weight": w, "Reps": r
                 })
-                st.toast(f"Logged {ex}!")
+                st.toast("Saved!")
 
-# --- HISTORY SECTION ---
-elif menu == "History":
-    st.header("📜 Training History")
+# --- TAB 3: HISTORY ---
+with menu[2]:
     if st.session_state.workout_log:
-        df = pd.DataFrame(st.session_state.workout_log)
-        st.dataframe(df, use_container_width=True)
-        
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download History", csv, "gym_history.csv", "text/csv")
-    else:
-        st.write("No history recorded yet.")
+        st.dataframe(pd.DataFrame(st.session_state.workout_log), use_container_width=True)
         
