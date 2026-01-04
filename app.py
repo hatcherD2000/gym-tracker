@@ -4,7 +4,7 @@ import plotly.express as px
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
-st.set_page_config(page_title="ProTrack 1RM Elite", layout="wide")
+st.set_page_config(page_title="ProTrack Elite", layout="wide")
 
 # --- MASTER LIST ---
 EXERCISES = [item for sublist in {
@@ -20,33 +20,41 @@ EXERCISES = [item for sublist in {
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def calculate_1rm(w, r):
-    if r == 1: return w
+    if r <= 1: return w
     return round(w / (1.0278 - 0.0278 * r), 1)
 
-def load_logs():
-    try: 
-        df = conn.read(worksheet="logs", ttl=0)
-        df['Date'] = pd.to_datetime(df['Date'])
-        if not df.empty:
-            df['Week'] = df['Date'].dt.isocalendar().week
-            start_week = df['Week'].min()
-            df['Program Week'] = df['Week'] - start_week + 1
-        return df
-    except: 
-        return pd.DataFrame(columns=["Date", "Routine", "Exercise", "Weight", "Reps", "Volume", "Program Week", "Est1RM"])
+# Safer Data Loading
+def load_all_data():
+    try:
+        logs = conn.read(worksheet="logs", ttl=0)
+        logs['Date'] = pd.to_datetime(logs['Date'])
+    except:
+        logs = pd.DataFrame(columns=["Date", "Routine", "Exercise", "Weight", "Reps", "Volume", "Est1RM"])
+    
+    try:
+        routines = conn.read(worksheet="routines", ttl=0)
+    except:
+        routines = pd.DataFrame(columns=["RoutineName", "Exercises"])
+        
+    return logs, routines
 
-df_logs = load_logs()
-df_routines = conn.read(worksheet="routines", ttl=0) if 'routines' in [sh.name for sh in conn.list_worksheets()] else pd.DataFrame(columns=["RoutineName", "Exercises"])
+df_logs, df_routines = load_all_data()
+
+# Process Week Numbers
+if not df_logs.empty:
+    df_logs['Week'] = df_logs['Date'].dt.isocalendar().week
+    start_week = df_logs['Week'].min()
+    df_logs['Program Week'] = df_logs['Week'] - start_week + 1
 
 st.title("🏋️‍♂️ ProTrack: Elite Progression")
 
 tab1, tab2, tab3 = st.tabs(["🔥 Log Workout", "📊 Strength Analytics", "🛠 Program Builder"])
 
-# --- TAB 1: LOGGING & 1RM LIVE ---
+# --- TAB 1: LOGGING ---
 with tab1:
     routine_now = st.selectbox("Current Routine", ["Upper", "Lower", "Push", "Pull", "Legs"])
     
-    # Smart Filter
+    # Check for custom routine exercises
     if not df_routines.empty and routine_now in df_routines['RoutineName'].values:
         ex_options = df_routines[df_routines['RoutineName'] == routine_now]['Exercises'].values[0].split(",")
     else:
@@ -54,15 +62,14 @@ with tab1:
     
     ex_choice = st.selectbox("Select Exercise", ex_options)
 
-    # All-Time PR Stats
     if not df_logs.empty:
         ex_history = df_logs[df_logs['Exercise'] == ex_choice]
         if not ex_history.empty:
             max_w = ex_history['Weight'].max()
             max_1rm = ex_history['Est1RM'].max()
-            col_a, col_b = st.columns(2)
-            col_a.metric("All-Time Max Weight", f"{max_w}kg")
-            col_b.metric("Estimated 1RM Capability", f"{max_1rm}kg")
+            c1, c2 = st.columns(2)
+            c1.metric("All-Time Max Weight", f"{max_w}kg")
+            c2.metric("Estimated 1RM", f"{max_1rm}kg")
 
     with st.form("set_log", clear_on_submit=True):
         c1, c2 = st.columns(2)
@@ -70,8 +77,6 @@ with tab1:
         r = c2.number_input("Reps", step=1, min_value=1)
         if st.form_submit_button("Confirm Set"):
             current_1rm = calculate_1rm(w, r)
-            is_pr = (w > max_w) if not df_logs.empty and not ex_history.empty else False
-            
             new_log = pd.DataFrame([{
                 "Date": datetime.now().strftime("%Y-%m-%d"), 
                 "Routine": routine_now, 
@@ -81,35 +86,20 @@ with tab1:
                 "Volume": w*r,
                 "Est1RM": current_1rm
             }])
-            
-            final_df = pd.concat([df_logs, new_log], ignore_index=True)
-            conn.update(worksheet="logs", data=final_df)
-            
-            if is_pr:
-                st.balloons()
-                st.success(f"🔥 PERSONAL RECORD! Est. 1RM for this set: {current_1rm}kg")
-            else:
-                st.info(f"Set Logged. Calculated 1RM: {current_1rm}kg")
+            updated_logs = pd.concat([df_logs, new_log], ignore_index=True)
+            conn.update(worksheet="logs", data=updated_logs)
+            st.success(f"Logged! Est. 1RM: {current_1rm}kg")
             st.rerun()
 
-# --- TAB 2: ANALYTICS (1RM vs Weight) ---
+# --- TAB 2: ANALYTICS ---
 with tab2:
     if not df_logs.empty:
         comp_ex = st.selectbox("Analyze Progress:", df_logs['Exercise'].unique())
         sub_df = df_logs[df_logs['Exercise'] == comp_ex].sort_values(by="Date")
-        
-        # Plotting both Actual Weight and Estimated 1RM
-        fig = px.line(sub_df, x="Date", y=["Weight", "Est1RM"], 
-                      labels={"value": "Kilograms", "variable": "Metric"},
-                      title=f"Strength Trends: {comp_ex}",
-                      markers=True, template="plotly_dark")
+        fig = px.line(sub_df, x="Date", y=["Weight", "Est1RM"], markers=True, template="plotly_dark")
         st.plotly_chart(fig, use_container_width=True)
-
-        st.subheader("Weekly Strength Ceiling")
-        weekly_ceil = sub_df.groupby('Program Week')['Est1RM'].max().reset_index()
-        st.bar_chart(weekly_ceil, x="Program Week", y="Est1RM")
     else:
-        st.info("No data for analytics yet.")
+        st.info("Log your first set to unlock charts!")
 
 # --- TAB 3: BUILDER ---
 with tab3:
@@ -117,7 +107,10 @@ with tab3:
     planned = st.multiselect(f"Exercises for {r_to_build}", EXERCISES)
     if st.button("Save Routine"):
         new_r = pd.DataFrame([{"RoutineName": r_to_build, "Exercises": ",".join(planned)}])
-        df_routines = pd.concat([df_routines[df_routines['RoutineName'] != r_to_build], new_r], ignore_index=True)
+        # Filter out old version of this routine
+        if not df_routines.empty:
+            df_routines = df_routines[df_routines['RoutineName'] != r_to_build]
+        df_routines = pd.concat([df_routines, new_r], ignore_index=True)
         conn.update(worksheet="routines", data=df_routines)
-        st.success("Cloud Updated.")
+        st.success("Cloud Updated!")
         
