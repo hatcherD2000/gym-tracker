@@ -1,98 +1,60 @@
 import streamlit as st
 import pandas as pd
-import os
 from datetime import datetime
 
-st.set_page_config(page_title="ProTrack Evolution", layout="wide")
+st.set_page_config(page_title="ProTrack Pro", layout="wide")
 
-# --- 1. PRESET WORKOUTS ---
-PRESETS = {
-    "Push (Chest/Shoulders/Tri)": [
-        "Barbell Bench Press", "Incline DB Bench Press", 
-        "Dumbbell Overhead Press", "High Cable Lateral Raises (single arm)", 
-        "Push downs", "Dips"
-    ],
-    "Pull (Back/Biceps)": [
-        "Weighted Pull Ups", "Close Grip Lat Pull Down", 
-        "Deficit Pendlay Row", "Baysian Cable Curl", "Preacher Curl"
-    ],
-    "Legs": [
-        "Barbell Back Squat", "RDL", "Hack Squat", 
-        "Seated Leg Extension", "Lying Hamstring Curl"
-    ]
+# --- FULL EXERCISE DATABASE ---
+EXERCISES = {
+    "Chest": ["Incline DB Bench Press", "Incline Barbell Bench Press", "Barbell Bench Press", "Dumbbell Bench Press", "Seated Cable Flys", "Pec Dec Flys"],
+    "Back": ["Weighted Pull Ups", "Close Grip Lat Pull Down", "Deficit Pendlay Row", "T-Bar Chest Supported Row", "Single Arm Cable Lat Pulls"],
+    "Shoulders": ["High Cable Lateral Raises (single arm)", "Full ROM Lateral Raises", "Dumbbell Overhead Press", "Reverse pec dec fly", "Incline 'Y' raises"],
+    "Biceps": ["Baysian Cable Curl", "Incline Dumbbell Curl", "Standing Dumbbell Curl", "Lying dumbbell curl", "Preacher Curl"],
+    "Triceps": ["Overhead Cable Extension", "Skull Crushers", "Push downs", "Dips", "Single Arm Tricep Kickbacks"],
+    "Legs": ["Lying Hamstring Curl", "Seated Hamstring Curl", "Pendulum Squat", "Hack Squat", "Barbell Back Squat", "Barbell Smith Machine Squat", "RDL", "Seated Leg Extension", "Standing Calf Raise", "Barbell Hip Thrust", "Machine Hip Thrust", "Hip Abduction", "Hip Adduction"]
 }
 
-# --- 2. DATA PERSISTENCE ---
-# This looks for an existing file to load your progress
-FILE_NAME = "workout_history.csv"
-
+# Temporary storage for the session (Until we connect Google Sheets)
 if 'history' not in st.session_state:
-    if os.path.exists(FILE_NAME):
-        st.session_state.history = pd.read_csv(FILE_NAME).to_dict('records')
-    else:
-        st.session_state.history = []
+    st.session_state.history = []
 
-def save_data():
-    df = pd.DataFrame(st.session_state.history)
-    df.to_csv(FILE_NAME, index=False)
+st.title("🏋️‍♂️ ProTrack: Week-on-Week")
 
-# --- 3. UI LAYOUT ---
-st.title("🏋️‍♂️ ProTrack Evolution")
-
-tab1, tab2, tab3 = st.tabs(["🔥 Active Workout", "📅 Weekly Progress", "⚙️ Setup Presets"])
+tab1, tab2 = st.tabs(["Log Workout", "Progress Tracker"])
 
 with tab1:
-    col_a, col_b = st.columns([1, 2])
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        cat = st.selectbox("Muscle Group", list(EXERCISES.keys()))
+        ex = st.selectbox("Exercise", EXERCISES[cat])
     
-    with col_a:
-        st.subheader("Select Routine")
-        routine_name = st.selectbox("Which program today?", list(PRESETS.keys()))
-        current_exercises = PRESETS[routine_name]
-        
-    with col_b:
-        st.subheader(f"Logging: {routine_name}")
-        ex_to_log = st.selectbox("Exercise", current_exercises)
-        
-        # PROGRESSION LOGIC: Show what you did last time
+    with col2:
+        # PROGRESSION CHECK: Look for previous performance in history
         if st.session_state.history:
-            past_df = pd.DataFrame(st.session_state.history)
-            past_perf = past_df[past_df['Exercise'] == ex_to_log]
-            if not past_perf.empty:
-                last_set = past_perf.iloc[-1]
-                st.warning(f"Last time: {last_set['Weight']}kg x {last_set['Reps']}")
+            df = pd.DataFrame(st.session_state.history)
+            prev = df[df['Exercise'] == ex]
+            if not prev.empty:
+                last_set = prev.iloc[-1]
+                st.metric("Previous Lift", f"{last_set['Weight']}kg", f"{last_set['Reps']} Reps")
+            else:
+                st.info("First time logging this exercise!")
 
-        with st.form("set_entry", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            w = c1.number_input("Weight", min_value=0.0, step=2.5)
-            r = c2.number_input("Reps", min_value=1, step=1)
-            if st.form_submit_button("Log Set"):
-                new_entry = {
-                    "Date": datetime.now().strftime("%Y-%m-%d"),
-                    "Routine": routine_name,
-                    "Exercise": ex_to_log,
-                    "Weight": w,
-                    "Reps": r,
-                    "Volume": w * r
-                }
-                st.session_state.history.append(new_entry)
-                save_data() # Saves to CSV
-                st.success("Set Logged!")
+    with st.form("log_set", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        w = c1.number_input("Weight (kg)", min_value=0.0, step=2.5)
+        r = c2.number_input("Reps", min_value=1, step=1)
+        if st.form_submit_button("Log Set"):
+            st.session_state.history.append({
+                "Date": datetime.now().strftime("%Y-%m-%d"),
+                "Exercise": ex, "Weight": w, "Reps": r, "Volume": w*r
+            })
+            st.success(f"Logged {w}kg x {r}")
 
 with tab2:
-    st.subheader("Your Progress Over Time")
     if st.session_state.history:
         df_hist = pd.DataFrame(st.session_state.history)
-        
-        # Filter by exercise to see growth
-        filter_ex = st.selectbox("Filter Progress by Exercise", df_hist['Exercise'].unique())
-        filtered_df = df_hist[df_hist['Exercise'] == filter_ex]
-        
-        st.line_chart(filtered_df, x="Date", y="Weight")
-        st.dataframe(filtered_df.sort_values(by="Date", ascending=False))
+        st.line_chart(df_hist, x="Date", y="Weight")
+        st.dataframe(df_hist)
     else:
-        st.info("No history found. Start training to see your charts!")
-
-with tab3:
-    st.info("In this section, you can eventually add or modify your preset routines.")
-    st.write("Current Exercises in System:", sum(len(v) for v in PRESETS.values()))
-  
+        st.write("Start training to see progress!")
+        
